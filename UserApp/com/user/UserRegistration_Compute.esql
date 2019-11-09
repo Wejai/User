@@ -1,0 +1,105 @@
+BROKER SCHEMA com.user
+
+
+CREATE COMPUTE MODULE UserRegistration_Compute
+	CREATE FUNCTION Main() RETURNS BOOLEAN
+	BEGIN
+		CALL CopyMessageHeaders();
+		-- CALL CopyEntireMessage();
+		
+		DECLARE method CHARACTER SUBSTRING(InputRoot.HTTPInputHeader."X-Original-HTTP-Command" BEFORE ' ');
+		
+		DECLARE sch CHARACTER 'userapp';
+		DECLARE tbl CHARACTER 'user';
+		DECLARE userid CHARACTER COALESCE(InputLocalEnvironment.HTTP.Input.QueryString.userid,'');
+		DECLARE app CHARACTER COALESCE(InputLocalEnvironment.HTTP.Input.QueryString.app,'');
+		
+		
+		CASE
+			method
+		WHEN 'POST' THEN
+			
+			IF (EXISTS(InputRoot.JSON.Data[])) THEN
+				DECLARE inRef REFERENCE TO InputRoot.JSON.Data;
+				INSERT INTO Database.{sch}.{tbl}(firstname, lastname, createdtime, status) VALUES 
+				(inRef.firstname, inRef.lastname, CURRENT_TIMESTAMP, inRef.status);
+			ELSE
+				DECLARE firstname1 CHARACTER COALESCE(InputLocalEnvironment.HTTP.Input.QueryString.firstname,'');
+				DECLARE lastname1 CHARACTER COALESCE(InputLocalEnvironment.HTTP.Input.QueryString.lastname,'');
+				DECLARE status1 CHARACTER COALESCE(InputLocalEnvironment.HTTP.Input.QueryString.status,'');
+				INSERT INTO Database.{sch}.{tbl}(firstname, lastname, createdtime, status) VALUES 
+				(firstname1, lastname1, CURRENT_TIMESTAMP, status1);
+			END IF;
+			SET OutputRoot.JSON.Data.Result = 'Success';
+		WHEN 'GET' THEN	
+			IF userid = '' THEN
+				SET OutputRoot.JSON.Data.Item[] = SELECT P.userid, P.firstname, P.lastname, P.createdtime, P.updatedtime,
+				P.status FROM Database.{sch}.{tbl} AS P;
+			ELSE
+				SET OutputRoot.JSON.Data.Item[] = SELECT P.userid, P.firstname, P.lastname, P.createdtime, P.updatedtime,
+				P.status FROM Database.{sch}.{tbl} AS P WHERE P.userid = userid;
+			END IF;
+			
+			DECLARE markup CHARACTER '';
+			IF app = 'app' THEN
+				
+				FOR rItem AS OutputRoot.JSON.Data.Item[] DO
+					SET	markup = markup || '<tr id=u'||CAST(rItem.userid AS CHAR)||'><td><input type=checkbox name=record></td>';
+					SET	markup = markup || '<td>' || COALESCE(CAST(rItem.userid AS CHAR),'') || '</td>';
+					SET	markup = markup || '<td>' || COALESCE(CAST(rItem.firstname AS CHAR),'') || '</td>';
+					SET	markup = markup || '<td>' || COALESCE(CAST(rItem.lastname AS CHAR),'') || '</td>';
+					SET	markup = markup || '<td>' || COALESCE(CAST(rItem.createdtime AS CHAR),'') || '</td>';
+					SET	markup = markup || '<td>' || COALESCE(CAST(rItem.updatedtime AS CHAR),'') || '</td>';
+					SET	markup = markup || '<td>' || COALESCE(CAST(rItem.status AS CHAR),'') || '</td>';
+					SET	markup = markup || '</tr>';
+				END FOR;
+				
+				SET OutputRoot.XMLNSC.markup = markup;
+				SET OutputRoot.JSON = null;
+			ELSE
+				SET OutputRoot.JSON.Data.Result = 'Success';
+			END IF;
+			
+--			CREATE FIELD OutputRoot.JSON.Data.Details IDENTITY(JSON.Array) Details;
+--			DECLARE I INTEGER 1;
+--			FOR rItem AS OutputLocalEnvironment.Data.Item[] DO
+--				SET OutputRoot.JSON.Data.Details.userid[I] 		= FIELDVALUE(rItem.userid);
+--				SET OutputRoot.JSON.Data.Details.firstname[I] 	= FIELDVALUE(rItem.firstname);
+--				SET OutputRoot.JSON.Data.Details.lastname[I] 	= FIELDVALUE(rItem.lastname);
+--				SET OutputRoot.JSON.Data.Details.createdtime[I] = FIELDVALUE(rItem.createdtime);
+--				SET OutputRoot.JSON.Data.Details.updatedtime[I] = FIELDVALUE(rItem.updatedtime);
+--				SET OutputRoot.JSON.Data.Details.status[I] 		= FIELDVALUE(rItem.status);
+--				SET I = I + 1;
+--			END FOR;
+			
+		WHEN 'PUT' THEN	
+			DECLARE inRef REFERENCE TO InputRoot.JSON.Data;
+			UPDATE Database.{sch}.{tbl} AS T SET firstname = inRef.firstname, 
+			lastname = inRef.lastname, 
+			updatedtime = CURRENT_TIMESTAMP, 
+			status = inRef.firstname WHERE T.userid = inRef.userid;
+			SET OutputRoot.JSON.Data.Result = 'Success';
+		WHEN 'DELETE' THEN	
+			DELETE FROM Database.{sch}.{tbl} AS T WHERE T.userid = userid;
+			SET OutputRoot.JSON.Data.Result = 'Success';	
+		ELSE
+			SET OutputRoot.JSON.Data.Result = 'Failed';
+		END CASE;
+		
+		RETURN TRUE;
+	END;
+
+	CREATE PROCEDURE CopyMessageHeaders() BEGIN
+		DECLARE I INTEGER 1;
+		DECLARE J INTEGER;
+		SET J = CARDINALITY(InputRoot.*[]);
+		WHILE I < J DO
+			SET OutputRoot.*[I] = InputRoot.*[I];
+			SET I = I + 1;
+		END WHILE;
+	END;
+
+	CREATE PROCEDURE CopyEntireMessage() BEGIN
+		SET OutputRoot = InputRoot;
+	END;
+END MODULE;
